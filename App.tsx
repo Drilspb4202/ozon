@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { analyzeCompetitors, generateProductCard, generateProductImage, analyzeGeneratedCard, editProductImage, generateInfographic, analyzeByUrl, analyzePricing } from './services/geminiService';
+import { analyzeCompetitors, generateProductCard, generateProductImage, analyzeGeneratedCard, editProductImage, generateInfographic, analyzeByUrl, analyzePricing, generateSoraPrompt, generateGroqPrompt, generateProductCardFromImage } from './services/geminiService';
 import { CompetitorProduct, GeneratedProduct, Marketplace, CardAnalysis, ImageStyle, PriceAnalysis } from './types';
 import Header from './components/Header';
 import SearchForm, { GeneratePayload } from './components/SearchForm';
@@ -21,6 +21,9 @@ const App: React.FC = () => {
   const [step, setStep] = useState<string>('Готовы к работе. Введите запрос, чтобы начать.');
   const [resultTitle, setResultTitle] = useState('');
   const [initialFormData, setInitialFormData] = useState<{ title: string; description: string; features: string[] } | null>(null);
+  const [soraPrompt, setSoraPrompt] = useState<string | null>(null);
+  const [groqPrompt, setGroqPrompt] = useState<string | null>(null);
+  const [isGeneratingPrompts, setIsGeneratingPrompts] = useState(false);
 
 
   const clearState = () => {
@@ -30,10 +33,12 @@ const App: React.FC = () => {
     setCardAnalysis(null);
     setPriceAnalysis(null);
     setResultTitle('');
+    setSoraPrompt(null);
+    setGroqPrompt(null);
   };
 
   const handleGenerate = useCallback(async (payload: GeneratePayload) => {
-    const { productQuery, description, features, marketplace, style } = payload;
+    const { productQuery, description, features, marketplace, style, uploadedImage } = payload;
     setIsLoading(true);
     clearState();
     setInitialFormData(null);
@@ -48,26 +53,33 @@ const App: React.FC = () => {
       setPriceAnalysis(pricingData);
 
       let cardContent: Omit<GeneratedProduct, 'imageUrl'>;
+      let imageUrl: string;
 
-      if (description && features && features.length > 0) {
-          setStep('Обновляем вашу карточку товара...');
-          cardContent = {
-              title: productQuery,
-              description,
-              features
-          };
+      if (uploadedImage) {
+        setStep('Создаем описание по вашему фото...');
+        cardContent = await generateProductCardFromImage(uploadedImage, productQuery, description, features, marketplace);
+        imageUrl = uploadedImage;
       } else {
-          setStep('Создаем вашу уникальную карточку товара...');
-          cardContent = await generateProductCard(competitorData, productQuery, marketplace);
+          if (description && features && features.length > 0) {
+              setStep('Обновляем вашу карточку товара...');
+              cardContent = {
+                  title: productQuery,
+                  description,
+                  features
+              };
+          } else {
+              setStep('Создаем вашу уникальную карточку товара...');
+              cardContent = await generateProductCard(competitorData, productQuery, marketplace);
+          }
+          
+          setStep('Генерируем изображение для товара...');
+          const imagePrompt = `Фотореалистичное изображение высокого качества: ${cardContent.title}. Студийный свет, чистый фон.`;
+          imageUrl = await generateProductImage(imagePrompt, style);
       }
       
       setStep('Проводим экспертный анализ...');
       const analysis = await analyzeGeneratedCard(competitorData, cardContent);
       setCardAnalysis(analysis);
-
-      setStep('Генерируем изображение для товара...');
-      const imagePrompt = `Фотореалистичное изображение высокого качества: ${cardContent.title}. Студийный свет, чистый фон.`;
-      const imageUrl = await generateProductImage(imagePrompt, style);
       
       setGeneratedProduct({ ...cardContent, imageUrl });
       setStep('Готово! Ваша карточка товара успешно создана.');
@@ -172,6 +184,27 @@ const handleEditImage = useCallback(async (editPrompt: string) => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
+  const handleGenerateCreativePrompts = useCallback(async () => {
+    if (!generatedProduct) return;
+    setIsGeneratingPrompts(true);
+    setSoraPrompt(null);
+    setGroqPrompt(null);
+    setError(null); 
+    try {
+      const [soraResult, groqResult] = await Promise.all([
+        generateSoraPrompt(generatedProduct),
+        generateGroqPrompt(generatedProduct),
+      ]);
+      setSoraPrompt(soraResult);
+      setGroqPrompt(groqResult);
+    } catch (err) {
+      console.error("Creative prompt generation failed:", err);
+      setError('Не удалось сгенерировать креативные промпты.'); 
+    } finally {
+      setIsGeneratingPrompts(false);
+    }
+  }, [generatedProduct]);
+
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200">
@@ -223,6 +256,10 @@ const handleEditImage = useCallback(async (editPrompt: string) => {
                         onGenerateInfographic={handleGenerateInfographic}
                         isGeneratingInfographic={isGeneratingInfographic}
                         onClone={handleCloneCard}
+                        onGenerateCreativePrompts={handleGenerateCreativePrompts}
+                        isGeneratingPrompts={isGeneratingPrompts}
+                        soraPrompt={soraPrompt}
+                        groqPrompt={groqPrompt}
                       />
                     </section>
                   )}

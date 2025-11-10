@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Marketplace, ImageStyle } from '../types';
+import UploadIcon from './icons/UploadIcon';
+import TrashIcon from './icons/TrashIcon';
 
 export interface GeneratePayload {
   productQuery: string;
@@ -7,6 +9,7 @@ export interface GeneratePayload {
   features?: string[];
   marketplace: Marketplace;
   style: ImageStyle;
+  uploadedImage?: string | null;
 }
 interface SearchFormProps {
   onGenerate: (payload: GeneratePayload) => void;
@@ -25,6 +28,9 @@ const SearchForm: React.FC<SearchFormProps> = ({ onGenerate, onAnalyze, isLoadin
   const [marketplace, setMarketplace] = useState<Marketplace>(Marketplace.Wildberries);
   const [imageStyle, setImageStyle] = useState<ImageStyle>(ImageStyle.Standard);
   const [mode, setMode] = useState<Mode>('generate');
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
 
   useEffect(() => {
     if (initialData) {
@@ -32,6 +38,7 @@ const SearchForm: React.FC<SearchFormProps> = ({ onGenerate, onAnalyze, isLoadin
       setDescription(initialData.description);
       setFeatures(initialData.features.join('\n'));
       setMode('generate');
+      setUploadedImage(null);
     }
   }, [initialData]);
 
@@ -39,6 +46,7 @@ const SearchForm: React.FC<SearchFormProps> = ({ onGenerate, onAnalyze, isLoadin
       setProductQuery('');
       setDescription('');
       setFeatures('');
+      setUploadedImage(null);
   }
 
   const handleModeChange = (newMode: Mode) => {
@@ -50,6 +58,24 @@ const SearchForm: React.FC<SearchFormProps> = ({ onGenerate, onAnalyze, isLoadin
     }
   }
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setUploadedImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setUploadedImage(null);
+    if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (isLoading) return;
@@ -60,7 +86,8 @@ const SearchForm: React.FC<SearchFormProps> = ({ onGenerate, onAnalyze, isLoadin
         description: description.trim(),
         features: features.trim() ? features.split('\n').filter(f => f.trim() !== '') : [],
         marketplace, 
-        style: imageStyle
+        style: imageStyle,
+        uploadedImage,
       });
     } else if (mode === 'analyze' && productUrl.trim()) {
       onAnalyze(productUrl, marketplace);
@@ -92,35 +119,79 @@ const SearchForm: React.FC<SearchFormProps> = ({ onGenerate, onAnalyze, isLoadin
             {mode === 'generate' ? 'Создайте или отредактируйте карточку' : 'Проанализируйте карточку товара'}
         </h2>
         <p className="text-gray-400 mb-6 text-center text-sm max-w-md mx-auto">
-             {mode === 'generate' ? 'Опишите товар или клонируйте существующий для редактирования, и AI создаст для вас идеальное предложение.' : 'Вставьте ссылку на товар, и AI проведет полный аудит карточки и ее конкурентов.'}
+             {mode === 'generate' ? 'Опишите товар, загрузите фото или клонируйте существующий для редактирования, и AI создаст для вас идеальное предложение.' : 'Вставьте ссылку на товар, и AI проведет полный аудит карточки и ее конкурентов.'}
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-6">
             {mode === 'generate' ? (
                 <div className="space-y-4">
+                    {/* Image Upload Section */}
+                    <div>
+                         <label className="block text-sm font-medium text-gray-300 mb-2">
+                            Фотография товара (опционально)
+                        </label>
+                        {uploadedImage ? (
+                            <div className="relative group">
+                                <img src={uploadedImage} alt="Превью товара" className="w-full h-48 object-contain rounded-lg bg-gray-700 p-2 border border-gray-600" />
+                                <button
+                                    type="button"
+                                    onClick={handleRemoveImage}
+                                    className="absolute top-2 right-2 p-2 bg-red-600/80 hover:bg-red-500 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                                    title="Удалить изображение"
+                                >
+                                    <TrashIcon className="w-5 h-5" />
+                                </button>
+                            </div>
+                        ) : (
+                             <div 
+                                className="relative block w-full h-32 border-2 border-gray-600 border-dashed rounded-lg p-4 text-center hover:border-cyan-500 transition-colors duration-200 cursor-pointer flex flex-col justify-center items-center"
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                <UploadIcon className="mx-auto h-8 w-8 text-gray-500"/>
+                                <span className="mt-2 block text-sm font-semibold text-gray-400">
+                                    Перетащите или нажмите для загрузки
+                                </span>
+                                 <span className="block text-xs text-gray-500">
+                                    PNG, JPG, WEBP (рекомендуется 1:1)
+                                </span>
+                                <input
+                                    ref={fileInputRef}
+                                    id="file-upload"
+                                    name="file-upload"
+                                    type="file"
+                                    className="sr-only"
+                                    accept="image/png, image/jpeg, image/webp"
+                                    onChange={handleFileChange}
+                                    disabled={isLoading}
+                                />
+                            </div>
+                        )}
+                    </div>
+
                     <div>
                         <label htmlFor="productQuery" className="block text-sm font-medium text-gray-300 mb-2">
-                            Название товара
+                           {uploadedImage ? 'Уточните название товара' : 'Название товара'}
                         </label>
                         <input
                             id="productQuery"
                             type="text"
                             value={productQuery}
                             onChange={(e) => setProductQuery(e.target.value)}
-                            placeholder="например, 'беспроводные наушники с шумоподавлением'"
+                            placeholder={uploadedImage ? "например, 'мужская кожаная куртка'" : "например, 'беспроводные наушники с шумоподавлением'"}
                             className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition duration-200"
                             disabled={isLoading}
                         />
+                         {uploadedImage && <p className="text-xs text-gray-500 mt-1">AI проанализирует фото, а это название поможет ему лучше понять контекст и найти конкурентов.</p>}
                     </div>
                      <div>
                         <label htmlFor="description" className="block text-sm font-medium text-gray-300 mb-2">
-                            Описание (опционально, для редактирования)
+                            Описание (опционально)
                         </label>
                         <textarea
                             id="description"
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
-                            placeholder="Оставьте пустым для генерации AI или введите свой текст для редактирования."
+                            placeholder={uploadedImage ? "Добавьте детали, которые AI должен учесть при создании описания по фото." : "Оставьте пустым для генерации AI или введите свой текст для редактирования."}
                             className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition duration-200 h-24 resize-y"
                             disabled={isLoading}
                         />
@@ -133,7 +204,7 @@ const SearchForm: React.FC<SearchFormProps> = ({ onGenerate, onAnalyze, isLoadin
                             id="features"
                             value={features}
                             onChange={(e) => setFeatures(e.target.value)}
-                            placeholder="Оставьте пустым для генерации AI или введите свой список для редактирования."
+                             placeholder={uploadedImage ? "Добавьте преимущества, которые AI должен учесть при создании списка по фото." : "Оставьте пустым для генерации AI или введите свой список для редактирования."}
                             className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition duration-200 h-24 resize-y"
                             disabled={isLoading}
                         />
@@ -177,7 +248,7 @@ const SearchForm: React.FC<SearchFormProps> = ({ onGenerate, onAnalyze, isLoadin
                 </div>
             </div>
 
-            {mode === 'generate' && (
+            {mode === 'generate' && !uploadedImage && (
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-2">Выберите стиль изображения</label>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
@@ -215,7 +286,7 @@ const SearchForm: React.FC<SearchFormProps> = ({ onGenerate, onAnalyze, isLoadin
                         {mode === 'generate' ? 'Генерация...' : 'Анализ...'}
                     </>
                 ) : (
-                     mode === 'generate' ? 'Сгенерировать' : 'Проанализировать'
+                     mode === 'generate' ? (uploadedImage ? 'Создать по фото' : 'Сгенерировать') : 'Проанализировать'
                 )}
             </button>
         </form>

@@ -11,6 +11,7 @@ import NeonIcon from './icons/NeonIcon';
 import BWIcon from './icons/BWIcon';
 import CinematicIcon from './icons/CinematicIcon';
 import CloneIcon from './icons/CloneIcon';
+import CreativePromptsGenerator from './CreativePromptsGenerator';
 
 
 interface GeneratedCardProps {
@@ -23,6 +24,10 @@ interface GeneratedCardProps {
   onGenerateInfographic: () => void;
   isGeneratingInfographic: boolean;
   onClone: (product: GeneratedProduct) => void;
+  onGenerateCreativePrompts: () => void;
+  isGeneratingPrompts: boolean;
+  soraPrompt: string | null;
+  groqPrompt: string | null;
 }
 
 const CopyButton: React.FC<{ textToCopy: string }> = ({ textToCopy }) => {
@@ -329,7 +334,7 @@ const InfographicGenerator: React.FC<{ onGenerate: () => void; isLoading: boolea
     );
 };
 
-const GeneratedCard: React.FC<GeneratedCardProps> = ({ product, analysis, onRegenerateImage, isImageLoading, onEditImage, isEditingImage, onGenerateInfographic, isGeneratingInfographic, onClone }) => {
+const GeneratedCard: React.FC<GeneratedCardProps> = ({ product, analysis, onRegenerateImage, isImageLoading, onEditImage, isEditingImage, onGenerateInfographic, isGeneratingInfographic, onClone, onGenerateCreativePrompts, isGeneratingPrompts, soraPrompt, groqPrompt }) => {
   const isAnyImageTaskRunning = isImageLoading || isEditingImage || isGeneratingInfographic;
   
   return (
@@ -399,6 +404,12 @@ const GeneratedCard: React.FC<GeneratedCardProps> = ({ product, analysis, onRege
       </div>
     </div>
     {analysis && <CardAnalytics analysis={analysis} />}
+    <CreativePromptsGenerator 
+        onGenerate={onGenerateCreativePrompts}
+        isLoading={isGeneratingPrompts}
+        soraPrompt={soraPrompt}
+        groqPrompt={groqPrompt}
+    />
     </>
   );
 };

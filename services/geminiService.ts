@@ -7,6 +7,16 @@ if (!process.env.API_KEY) {
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+const dataUrlToMimeTypeAndBase64 = (dataUrl: string): { mimeType: string; data: string } => {
+    const arr = dataUrl.split(',');
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    if (!mimeMatch || mimeMatch.length < 2) {
+        throw new Error("Invalid data URL");
+    }
+    return { mimeType: mimeMatch[1], data: arr[1] };
+};
+
+
 const competitorSchema = {
   type: Type.ARRAY,
   items: {
@@ -67,7 +77,7 @@ const generatedCardSchema = {
         description: 'Артикул (SKU) товара, извлеченный со страницы.'
       }
     },
-    required: ["title", "description", "features", "sku"],
+    required: ["title", "description", "features"],
 };
 
 const analysisSchema = {
@@ -88,7 +98,7 @@ const analysisSchema = {
 const analysisByUrlSchema = {
     type: Type.OBJECT,
     properties: {
-        analyzedProduct: generatedCardSchema,
+        analyzedProduct: { ...generatedCardSchema, required: ["title", "description", "features", "sku"]},
         competitors: competitorSchema,
         analysis: analysisSchema,
     },
@@ -139,13 +149,64 @@ export const generateProductCard = async (competitors: CompetitorProduct[], prod
     contents: prompt,
     config: {
       responseMimeType: 'application/json',
-      responseSchema: { ...generatedCardSchema, properties: {...generatedCardSchema.properties}, required: ["title", "description", "features"] }, // Omit SKU here
+      responseSchema: generatedCardSchema,
     },
   });
 
   const jsonText = response.text.trim();
   return JSON.parse(jsonText);
 };
+
+export const generateProductCardFromImage = async (
+    base64ImageDataUrl: string,
+    productQuery: string,
+    userDescription: string | undefined,
+    userFeatures: string[] | undefined,
+    marketplace: Marketplace
+): Promise<Omit<GeneratedProduct, 'imageUrl'>> => {
+    const { mimeType, data } = dataUrlToMimeTypeAndBase64(base64ImageDataUrl);
+
+    let prompt = `Ты — эксперт по маркетплейсам. Проанализируй изображение товара.
+    **Контекст от пользователя:** "${productQuery}".
+    Твоя задача — создать убедительную карточку товара для маркетплейса ${marketplace} на основе этого фото.
+    - Создай новое, уникальное и SEO-оптимизированное название, которое точно описывает товар на фото.
+    - Создай подробное продающее описание (используй Markdown), которое подчеркивает достоинства товара, видимые на изображении.
+    - Сформируй список из 5-7 ключевых преимуществ, основанных на визуальном анализе.
+    `;
+    
+    if(userDescription) {
+        prompt += `\n**Учти это описание от пользователя как дополнительный контекст:** "${userDescription}"`;
+    }
+    if(userFeatures && userFeatures.length > 0) {
+        prompt += `\n**Учти эти преимущества от пользователя как дополнительный контекст:** "${userFeatures.join(', ')}"`;
+    }
+    prompt += `\nРезультат верни в виде JSON, соответствующего предоставленной схеме.`;
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: {
+            parts: [
+                {
+                    inlineData: {
+                        data: data,
+                        mimeType: mimeType,
+                    },
+                },
+                {
+                    text: prompt,
+                },
+            ],
+        },
+        config: {
+            responseMimeType: 'application/json',
+            responseSchema: generatedCardSchema,
+        },
+    });
+
+    const jsonText = response.text.trim();
+    return JSON.parse(jsonText);
+};
+
 
 export const analyzeGeneratedCard = async (competitors: CompetitorProduct[], generatedCard: Omit<GeneratedProduct, 'imageUrl'>): Promise<CardAnalysis> => {
     const competitorContext = JSON.stringify(competitors, null, 2);
@@ -290,12 +351,8 @@ export const generateProductImage = async (prompt: string, style: ImageStyle): P
     throw new Error('Не удалось сгенерировать изображение.');
 };
 
-const dataUrlToBase64 = (dataUrl: string): string => {
-    return dataUrl.split(',')[1];
-};
-
 export const editProductImage = async (base64ImageDataUrl: string, prompt: string): Promise<string> => {
-    const base64Data = dataUrlToBase64(base64ImageDataUrl);
+    const { mimeType, data } = dataUrlToMimeTypeAndBase64(base64ImageDataUrl);
     
     const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
@@ -303,8 +360,8 @@ export const editProductImage = async (base64ImageDataUrl: string, prompt: strin
             parts: [
                 {
                     inlineData: {
-                        data: base64Data,
-                        mimeType: 'image/png',
+                        data: data,
+                        mimeType: mimeType,
                     },
                 },
                 {
@@ -317,10 +374,13 @@ export const editProductImage = async (base64ImageDataUrl: string, prompt: strin
         },
     });
 
-    for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-            const base64ImageBytes: string = part.inlineData.data;
-            return `data:image/png;base64,${base64ImageBytes}`;
+    const candidate = response.candidates?.[0];
+    if (candidate?.content?.parts) {
+        for (const part of candidate.content.parts) {
+            if (part.inlineData) {
+                const base64ImageBytes: string = part.inlineData.data;
+                return `data:image/png;base64,${base64ImageBytes}`;
+            }
         }
     }
     
@@ -328,7 +388,7 @@ export const editProductImage = async (base64ImageDataUrl: string, prompt: strin
 };
 
 export const generateInfographic = async (product: GeneratedProduct): Promise<string> => {
-    const base64Data = dataUrlToBase64(product.imageUrl);
+    const { mimeType, data } = dataUrlToMimeTypeAndBase64(product.imageUrl);
     
     const featuresText = product.features.slice(0, 4).map(f => `- ${f}`).join('\n');
 
@@ -347,8 +407,8 @@ ${featuresText}
             parts: [
                 {
                     inlineData: {
-                        data: base64Data,
-                        mimeType: 'image/png',
+                        data: data,
+                        mimeType: mimeType,
                     },
                 },
                 {
@@ -361,12 +421,52 @@ ${featuresText}
         },
     });
 
-    for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-            const base64ImageBytes: string = part.inlineData.data;
-            return `data:image/png;base64,${base64ImageBytes}`;
+    const candidate = response.candidates?.[0];
+    if (candidate?.content?.parts) {
+        for (const part of candidate.content.parts) {
+            if (part.inlineData) {
+                const base64ImageBytes: string = part.inlineData.data;
+                return `data:image/png;base64,${base64ImageBytes}`;
+            }
         }
     }
     
     throw new Error('Не удалось создать инфографику.');
+};
+
+export const generateSoraPrompt = async (product: GeneratedProduct): Promise<string> => {
+    const productContext = JSON.stringify({ title: product.title, description: product.description, features: product.features.slice(0,3) });
+    const prompt = `Ты — креативный директор и эксперт по AI-видеогенерации для Sora 2. На основе данных о товаре: ${productContext}, создай детальный, яркий и кинематографичный промпт.
+    
+    **Требования к промпту:**
+    - **Стиль:** Фотореалистичный, кинематографичный, высокое качество, 8K.
+    - **Длительность:** Сцена для короткого ролика (5-10 секунд).
+    - **Содержание:** Промпт должен описывать сцену, демонстрирующую товар в привлекательном и естественном контексте использования. Покажи ключевые преимущества товара в действии.
+    - **Детали:** Включи описание ракурса камеры (например, "close-up shot", "dynamic tracking shot"), освещения (например, "soft natural light", "dramatic studio lighting"), и атмосферы (например, "cozy morning atmosphere", "energetic and vibrant mood").
+    - **Формат:** Верни только текст самого промпта, без лишних вступлений и объяснений.`;
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+    });
+
+    return response.text.trim();
+};
+
+export const generateGroqPrompt = async (product: GeneratedProduct): Promise<string> => {
+    const productContext = JSON.stringify({ title: product.title, description: product.description, features: product.features.slice(0,3) });
+    const prompt = `Ты — арт-директор и AI-фотограф, эксперт по созданию промптов для Midjourney/DALL-E 3 (используя Groq для скорости). На основе данных о товаре: ${productContext}, создай подробный промпт для генерации фотореалистичного рекламного изображения.
+
+    **Требования к промпту:**
+    - **Стиль:** Фотореалистичное, журнальное качество, рекламный снимок продукта.
+    - **Содержание:** Опиши сцену, в которой товар является центральным элементом. Контекст должен соответствовать целевой аудитории и назначению товара.
+    - **Детали:** Укажи композицию, ракурс (например, "eye-level shot", "top-down view"), тип объектива (например, "85mm lens, f/1.8"), освещение ("soft window light", "three-point studio lighting"), и цветовую палитру.
+    - **Формат:** Верни только текст самого промпта, готовый для копирования, без лишних слов. Пример: "photo of a [product] on a [surface], [details about background and lighting], 8k, photorealistic, shot on a Sony A7IV".`;
+    
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+    });
+
+    return response.text.trim();
 };
