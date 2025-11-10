@@ -1,0 +1,5 @@
+{
+  "name": "Marketplace Card Generator",
+  "description": "An AI-powered tool to automatically generate product cards for marketplaces like Wildberries and Ozon. The system analyzes competitors and creates optimized product titles, descriptions, features, and images.",
+  "requestFramePermissions": []
+}
